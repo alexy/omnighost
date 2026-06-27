@@ -553,3 +553,23 @@
 .ghost-updater-hidden {
 	display: none;
 }
+
+/* Edit-properties modal: status indicator + public URL */
+.ghost-updater-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+	font-weight: 600;
+}
+.ghost-updater-status.is-published {
+	color: var(--color-green);
+}
+.ghost-updater-status-icon {
+	display: inline-flex;
+}
+.ghost-updater-public-url {
+	margin-bottom: 12px;
+	font-size: var(--font-ui-small);
+	word-break: break-all;
+}

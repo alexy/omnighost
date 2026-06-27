@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-27
+
+### Added
+- The Edit Ghost properties modal now shows a **status indicator** (check = published, clock = scheduled, circle = draft) and, for published/scheduled posts, the **public URL as a clickable link** (from `<prefix>public_url`).
+
 ## [0.4.1] - 2026-06-27
 
 ### Added

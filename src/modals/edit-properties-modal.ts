@@ -1,4 +1,10 @@
-import { App, Modal, Setting } from 'obsidian';
+import { App, Modal, Setting, setIcon } from 'obsidian';
+
+/** Read-only context shown at the top of the modal (not editable). */
+export interface GhostPropsInfo {
+	savedStatus: 'draft' | 'publish' | 'schedule';
+	publicUrl: string;
+}
 
 export interface GhostPropsForm {
 	status: 'draft' | 'publish' | 'schedule';
@@ -21,6 +27,7 @@ export interface GhostPropsForm {
 export class EditGhostPropertiesModal extends Modal {
 	private title: string;
 	private form: GhostPropsForm;
+	private info: GhostPropsInfo;
 	private onSubmit: (form: GhostPropsForm, doSync: boolean) => void | Promise<void>;
 	private dateSetting?: Setting;
 
@@ -28,11 +35,13 @@ export class EditGhostPropertiesModal extends Modal {
 		app: App,
 		title: string,
 		initial: GhostPropsForm,
+		info: GhostPropsInfo,
 		onSubmit: (form: GhostPropsForm, doSync: boolean) => void | Promise<void>
 	) {
 		super(app);
 		this.title = title;
 		this.form = { ...initial };
+		this.info = info;
 		this.onSubmit = onSubmit;
 	}
 
@@ -40,6 +49,29 @@ export class EditGhostPropertiesModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl('h3', { text: `Ghost properties — ${this.title}` });
+
+		// Status indicator + public URL (reflects the post's last-synced state)
+		const statusRow = contentEl.createDiv({ cls: 'ghost-updater-status' });
+		const iconEl = statusRow.createSpan({ cls: 'ghost-updater-status-icon' });
+		if (this.info.savedStatus === 'publish') {
+			setIcon(iconEl, 'check-circle');
+			statusRow.addClass('is-published');
+			statusRow.createSpan({ text: 'Published' });
+		} else if (this.info.savedStatus === 'schedule') {
+			setIcon(iconEl, 'clock');
+			statusRow.createSpan({ text: 'Scheduled' });
+		} else {
+			setIcon(iconEl, 'circle');
+			statusRow.createSpan({ text: 'Draft' });
+		}
+
+		if (this.info.publicUrl) {
+			const urlRow = contentEl.createDiv({ cls: 'ghost-updater-public-url' });
+			urlRow.createSpan({ text: 'Public URL: ' });
+			const link = urlRow.createEl('a', { text: this.info.publicUrl, href: this.info.publicUrl });
+			link.setAttr('target', '_blank');
+			link.setAttr('rel', 'noopener');
+		}
 
 		new Setting(contentEl)
 			.setName('Status')

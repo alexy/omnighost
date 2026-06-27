@@ -666,7 +666,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			featureImage: md?.feature_image ?? ''
 		};
 
-		new EditGhostPropertiesModal(this.app, file.basename, initial, async (form, doSync) => {
+		const info = { savedStatus: status, publicUrl: md?.public_url ?? '' };
+		new EditGhostPropertiesModal(this.app, file.basename, initial, info, async (form, doSync) => {
 			let updated = await this.app.vault.read(file);
 			const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
 			const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
