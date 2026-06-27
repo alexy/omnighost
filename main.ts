@@ -103,6 +103,28 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			void this.activateCalendarView();
 		});
 
+		// Ribbon icon to edit the active note's Ghost properties
+		this.addRibbonIcon('ghost', 'Edit ghost properties', () => {
+			const file = this.app.workspace.getActiveFile();
+			if (!file || file.extension !== 'md') {
+				new Notice('Open a note first');
+				return;
+			}
+			void this.openEditPropertiesModal(file);
+		});
+
+		// Editor right-click menu: edit Ghost properties
+		this.registerEvent(
+			this.app.workspace.on('editor-menu', (menu, _editor, view) => {
+				const file = view.file;
+				if (!file || file.extension !== 'md') return;
+				menu.addItem(item => item
+					.setTitle('Edit ghost properties')
+					.setIcon('ghost')
+					.onClick(() => { void this.openEditPropertiesModal(file); }));
+			})
+		);
+
 		// Register editor extensions for --members-only-- line decoration and deduplication
 		this.registerEditorExtension([paywallDecorationPlugin, paywallDeduplicateExtension]);
 
