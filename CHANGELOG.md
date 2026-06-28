@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-27
+
+### Added
+- **"Migrate ghost property prefix" command.** Renames every Ghost frontmatter key across all notes from the current prefix to a new one (e.g. `ghost_` -> `g_`), preserving values, and updates the plugin setting. Useful so the property names fit better in Obsidian's native Properties panel.
+
 ## [0.4.8] - 2026-06-27
 
 ### Fixed

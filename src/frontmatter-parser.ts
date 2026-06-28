@@ -56,6 +56,33 @@ export function joinFrontmatter(raw: string, body: string): string {
 }
 
 /**
+ * Rename top-level frontmatter keys that start with `oldPrefix` to use
+ * `newPrefix` instead (e.g. `ghost_post_access` -> `g_post_access`), preserving
+ * values and all other keys. Returns whether anything changed.
+ */
+export function migrateFrontmatterPrefix(
+	content: string,
+	oldPrefix: string,
+	newPrefix: string
+): { content: string; changed: boolean } {
+	const parsed = splitFrontmatter(content);
+	if (!parsed) return { content, changed: false };
+
+	let changed = false;
+	const newRaw = parsed.raw.split('\n').map((line) => {
+		const m = line.match(/^(\s*)([^:#\s][^:]*?):(.*)$/);
+		if (m && m[2].startsWith(oldPrefix)) {
+			changed = true;
+			return `${m[1]}${newPrefix}${m[2].slice(oldPrefix.length)}:${m[3]}`;
+		}
+		return line;
+	}).join('\n');
+
+	if (!changed) return { content, changed: false };
+	return { content: joinFrontmatter(newRaw, parsed.body), changed: true };
+}
+
+/**
  * Update (or add) a single key inside existing frontmatter raw text.
  * Preserves all other keys untouched.
  */

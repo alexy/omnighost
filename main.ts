@@ -7,7 +7,8 @@ import { CalendarView, CALENDAR_VIEW_TYPE } from './src/views/calendar-view';
 import { ImportFromGhostModal } from './src/modals/import-from-ghost-modal';
 import { LinkToGhostModal } from './src/modals/link-to-ghost-modal';
 import { EditGhostPropertiesModal, GhostPropsForm } from './src/modals/edit-properties-modal';
-import { updateFrontmatterWithGhostUrl, updateFrontmatterWithGhostId, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, parseGhostMetadata } from './src/frontmatter-parser';
+import { MigratePrefixModal } from './src/modals/migrate-prefix-modal';
+import { updateFrontmatterWithGhostUrl, updateFrontmatterWithGhostId, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
 import { htmlToMarkdown } from './src/converters/html-to-markdown';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
 
@@ -217,6 +218,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'clear-ghost-image-cache',
 			name: 'Clear ghost image cache',
 			callback: () => { void this.clearImageCache(); }
+		});
+
+		// Migrate the Ghost frontmatter prefix across all notes (e.g. ghost_ -> g_)
+		this.addCommand({
+			id: 'migrate-ghost-prefix',
+			name: 'Migrate ghost property prefix',
+			callback: () => {
+				new MigratePrefixModal(this.app, this.settings.yamlPrefix, (np) => this.migratePrefix(np)).open();
+			}
 		});
 
 		// Add command to insert the paywall marker at the cursor
@@ -691,6 +701,35 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.imageCache = {};
 		await this.saveImageCache();
 		new Notice(`Cleared ghost image cache (${n} ${n === 1 ? 'entry' : 'entries'})`);
+	}
+
+	/**
+	 * Rename all notes' Ghost frontmatter keys from the current prefix to a new
+	 * one (e.g. ghost_ -> g_), then update the plugin setting.
+	 */
+	private async migratePrefix(newPrefix: string): Promise<void> {
+		const oldPrefix = this.settings.yamlPrefix;
+		if (!newPrefix || newPrefix === oldPrefix) return;
+
+		new Notice('Migrating ghost property prefix…');
+		const files = this.app.vault.getMarkdownFiles();
+		let count = 0;
+		for (const file of files) {
+			try {
+				const content = await this.app.vault.read(file);
+				const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
+				if (changed) {
+					await this.app.vault.modify(file, migrated);
+					count++;
+				}
+			} catch (e) {
+				console.error('[Ghost] Prefix migration failed for', file.path, e);
+			}
+		}
+
+		this.settings.yamlPrefix = newPrefix;
+		await this.saveSettings();
+		new Notice(`Migrated ${count} note${count === 1 ? '' : 's'} from "${oldPrefix}" to "${newPrefix}"`);
 	}
 
 	/**
