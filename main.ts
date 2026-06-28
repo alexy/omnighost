@@ -1619,10 +1619,22 @@ class GhostWriterSettingTab extends PluginSettingTab {
 						pendingKey = '';
 						if (keyInput) { keyInput.value = ''; keyInput.placeholder = 'Stored — enter to replace'; }
 						if (secretNameInput && blog.apiKeySecretName !== prevName) secretNameInput.value = blog.apiKeySecretName;
-						setKeyDesc(true);
 						refreshWarn();
-						new Notice(`Saved key for ${blog.name || 'blog'} ✓`);
+						// Auto-test the connection with the key we just stored.
+						b.setDisabled(true);
+						keySetting.setDesc('Key stored — testing connection…');
+						const title = await plugin.getClientForBlog(blog).testConnection();
+						b.setDisabled(false);
+						if (title) {
+							keySetting.setDesc(`✓ Connected to ${title}. Enter a new key to replace it.`);
+							new Notice(`${blog.name || 'Blog'}: connected to ${title} ✓`);
+						} else {
+							// eslint-disable-next-line obsidianmd/ui/sentence-case
+							keySetting.setDesc('⚠ Key saved but the connection failed — check the key and site address.');
+							new Notice(`${blog.name || 'Blog'}: key saved but connection failed`);
+						}
 					} catch (e) {
+						b.setDisabled(false);
 						new Notice(`Could not save key: ${(e as Error).message}`);
 					}
 				}));

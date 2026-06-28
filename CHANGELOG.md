@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-06-28
+
+### Added
+- **Keys are connection-tested automatically when saved.** Hitting "Save key" now immediately verifies the key against the blog's site: the field shows "testing connection…", then "✓ Connected to <site>" or "⚠ Key saved but the connection failed — check the key and site address", with a matching notice. No need to hit Test separately (the manual Test button stays for re-checking).
+
+
 ## [0.8.5] - 2026-06-28
 
 ### Changed
