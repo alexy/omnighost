@@ -24,6 +24,7 @@ export class SyncEngine {
 	private activeFolder: string;            // active blog's vault folder
 	private writeBack = true;                // write ghost_id/url back? (off for multi-blog)
 	private activeKnownId?: string;          // known post id on the active blog (multi-blog)
+	private activeBlogName = '';             // active blog's name (for error messages)
 	/** The post produced by the last syncFileToGhost call (for per-blog id/URL tracking). */
 	lastSyncedPost: GhostPost | null = null;
 
@@ -49,12 +50,13 @@ export class SyncEngine {
 	 * single-blog note (robust id tracking), disabled for multi-blog notes (each
 	 * blog is matched by slug instead, so per-blog ids don't collide in one note).
 	 */
-	setActiveBlog(client: GhostAPIClient, baseUrl: string, folder: string, writeBack: boolean, knownId?: string): void {
+	setActiveBlog(client: GhostAPIClient, baseUrl: string, folder: string, writeBack: boolean, knownId?: string, blogName = ''): void {
 		this.ghostClient = client;
 		this.activeBaseUrl = baseUrl;
 		this.activeFolder = folder;
 		this.writeBack = writeBack;
 		this.activeKnownId = knownId;
+		this.activeBlogName = blogName;
 	}
 
 	/**
@@ -404,7 +406,8 @@ export class SyncEngine {
 		} catch (error) {
 			console.error(`[Ghost Sync] Error syncing ${file.path}:`, error);
 			if (this.settings.showSyncNotifications) {
-				new Notice(`Failed to sync ${file.name}: ${(error as Error).message}`);
+				const where = this.activeBlogName ? ` → ${this.activeBlogName}` : '';
+				new Notice(`Failed to sync ${file.name}${where}: ${(error as Error).message}`);
 			}
 			this.onStatusChange?.('error', `Error: ${(error as Error).message}`);
 			return false;

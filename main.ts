@@ -728,6 +728,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 	}
 
+	/** Lowercased hostname of a URL, or '' if unparseable. */
+	private hostOf(url: string): string {
+		try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
+	}
+
 	/** Read an Admin API key from the keychain by secret name. */
 	loadApiKeyForSecret(secretName: string): string {
 		if (!secretName || !this.app.secretStorage) return '';
@@ -862,13 +867,27 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const idsMap = this.readBlogMap(fmObj, `${prefix}ids`);
 		const urlsMap = this.readBlogMap(fmObj, `${prefix}public_urls`);
 		const legacyId = typeof fmObj[`${prefix}id`] === 'string' ? String(fmObj[`${prefix}id`]) : '';
+		// The legacy single g_id belongs to the blog the note was originally published
+		// to — identified by the host of its g_url/g_public_url — NOT whatever blog is
+		// default now. Misattributing it to another blog 404s (that id isn't there).
+		const legacyUrl = (typeof fmObj[`${prefix}url`] === 'string' ? String(fmObj[`${prefix}url`]) : '')
+			|| (typeof fmObj[`${prefix}public_url`] === 'string' ? String(fmObj[`${prefix}public_url`]) : '');
+		const legacyHost = this.hostOf(legacyUrl);
 
 		let ok = true;
 		let mapsChanged = false;
 		for (const blog of blogs) {
-			const knownId = idsMap[blog.name]
-				|| (blog.id === this.settings.defaultBlogId && legacyId ? legacyId : undefined);
-			this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, writeBack, knownId);
+			const ownsLegacy = !!legacyId && (legacyHost
+				? this.hostOf(blog.url) === legacyHost
+				: blog.id === this.settings.defaultBlogId);
+			const knownId = idsMap[blog.name] || (ownsLegacy ? legacyId : undefined);
+			// Skip a blog with no usable API key rather than emit a cryptic 401.
+			if (!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()) {
+				new Notice(`Blog "${blog.name}" has no API key — set it in settings.`);
+				ok = false;
+				continue;
+			}
+			this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, writeBack, knownId, blog.name);
 			try {
 				ok = (await this.syncEngine.syncFileToGhost(file)) && ok;
 			} catch (e) {

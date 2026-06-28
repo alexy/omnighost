@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-28
+
+### Fixed
+- **Cross-blog id misattribution (404 on multi-blog sync).** A note carrying a legacy single `g_id` now attributes it to the blog whose host matches its `g_url`/`g_public_url`, not whatever blog happens to be the current default. Previously the id was handed to the default blog, which 404'd ("cannot read post") because that post lives on a different blog. The other target blogs correctly fall back to slug lookup/create.
+- **Cryptic 401 on a blog with no key.** Before syncing, a blog whose API-key secret is empty is now skipped with a clear "Blog X has no API key — set it in settings" notice instead of an `UNKNOWN_ADMIN_API_KEY` 401.
+- **Anonymous sync errors.** Sync-failure notices now name the target blog (`Failed to sync note → BlogName: ...`).
+
 ## [0.8.2] - 2026-06-28
 
 ### Added
