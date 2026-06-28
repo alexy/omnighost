@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-28
+
+### Changed
+- **Per-blog ids and URLs are now individual, clickable properties.** The old nested `g_ids` / `g_public_urls` maps showed up in Obsidian's Properties panel as an unsupported (`?`) blob you couldn't click or read. Each extra blog now writes plain `g_id_<blog>` and `g_public_url_<blog>` keys (the blog that owns the note's original `g_id` keeps the clean `g_id` / `g_public_url`), so every URL is a real clickable link. Existing notes are migrated on the next sync and the old map keys are removed.
+
+### Fixed
+- **Saving a blog key no longer scrolls the settings to the top.** The key is confirmed in place ("Key stored ✓"), the secret-name field and collision warning update inline, and your scroll position is kept — so it's clear which blog you just set.
+
+
 ## [0.8.4] - 2026-06-28
 
 ### Fixed

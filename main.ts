@@ -9,7 +9,7 @@ import { LinkToGhostModal } from './src/modals/link-to-ghost-modal';
 import { EditGhostPropertiesModal, GhostPropsForm } from './src/modals/edit-properties-modal';
 import { MigratePrefixModal } from './src/modals/migrate-prefix-modal';
 import { SelectBlogsModal } from './src/modals/select-blogs-modal';
-import { updateFrontmatterWithGhostUrl, updateFrontmatterWithGhostId, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
+import { updateFrontmatterWithGhostUrl, updateFrontmatterWithGhostId, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, removeFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
 import { htmlToMarkdown } from './src/converters/html-to-markdown';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
 
@@ -733,6 +733,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
 	}
 
+	/** Frontmatter-key-safe suffix for a blog name (e.g. "Chief Scientist" → "chief_scientist"). */
+	private blogKeySuffix(name: string): string {
+		return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'blog';
+	}
+
 	/** Read an Admin API key from the keychain by secret name. */
 	loadApiKeyForSecret(secretName: string): string {
 		if (!secretName || !this.app.secretStorage) return '';
@@ -839,24 +844,22 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		return out;
 	}
 
-	/** Serialize a blog→string map as an inline YAML flow mapping. */
-	private serializeBlogMap(map: Record<string, string>): string {
-		const entries = Object.entries(map);
-		if (entries.length === 0) return '{}';
-		return '{' + entries.map(([k, v]) => `"${k}": "${v}"`).join(', ') + '}';
-	}
-
 	/** Per-blog published/draft status + URL for a note (empty unless 2+ target blogs). */
 	private buildBlogStatuses(file: TFile, fmObj: Record<string, unknown>): { name: string; url: string; published: boolean }[] {
 		const prefix = this.settings.yamlPrefix;
 		const targets = this.resolveBlogsForFile(file);
 		if (targets.length < 2) return [];
-		const urlsMap = this.readBlogMap(fmObj, `${prefix}public_urls`);
+		const urlsMap = this.readBlogMap(fmObj, `${prefix}public_urls`); // legacy fallback
 		const singlePublic = typeof fmObj[`${prefix}public_url`] === 'string' ? String(fmObj[`${prefix}public_url`]) : '';
+		const legacyUrl = (typeof fmObj[`${prefix}url`] === 'string' ? String(fmObj[`${prefix}url`]) : '') || singlePublic;
+		const legacyHost = this.hostOf(legacyUrl);
 		const pubVal = fmObj[`${prefix}published`];
 		const isPub = pubVal === true || pubVal === 'true';
 		return targets.map(b => {
-			const url = urlsMap[b.name] || (b.id === this.settings.defaultBlogId ? singlePublic : '');
+			const suffix = this.blogKeySuffix(b.name);
+			const flatUrl = typeof fmObj[`${prefix}public_url_${suffix}`] === 'string' ? String(fmObj[`${prefix}public_url_${suffix}`]) : '';
+			const ownsLegacy = legacyHost ? this.hostOf(b.url) === legacyHost : b.id === this.settings.defaultBlogId;
+			const url = flatUrl || urlsMap[b.name] || (ownsLegacy ? singlePublic : '');
 			return { name: b.name, url, published: isPub && !!url };
 		});
 	}
@@ -884,8 +887,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				if (d && typeof d === 'object') fmObj = d as Record<string, unknown>;
 			} catch { /* ignore */ }
 		}
+		// Legacy nested maps (from older versions) — read for migration only.
 		const idsMap = this.readBlogMap(fmObj, `${prefix}ids`);
-		const urlsMap = this.readBlogMap(fmObj, `${prefix}public_urls`);
+		const hadOldMaps = `${prefix}ids` in fmObj || `${prefix}public_urls` in fmObj;
 		const legacyId = typeof fmObj[`${prefix}id`] === 'string' ? String(fmObj[`${prefix}id`]) : '';
 		// The legacy single g_id belongs to the blog the note was originally published
 		// to — identified by the host of its g_url/g_public_url — NOT whatever blog is
@@ -893,14 +897,17 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const legacyUrl = (typeof fmObj[`${prefix}url`] === 'string' ? String(fmObj[`${prefix}url`]) : '')
 			|| (typeof fmObj[`${prefix}public_url`] === 'string' ? String(fmObj[`${prefix}public_url`]) : '');
 		const legacyHost = this.hostOf(legacyUrl);
+		const fmStr = (k: string) => typeof fmObj[k] === 'string' ? String(fmObj[k]) : '';
 
 		let ok = true;
-		let mapsChanged = false;
+		const updates: Record<string, string> = {};
 		for (const blog of blogs) {
+			const suffix = this.blogKeySuffix(blog.name);
 			const ownsLegacy = !!legacyId && (legacyHost
 				? this.hostOf(blog.url) === legacyHost
 				: blog.id === this.settings.defaultBlogId);
-			const knownId = idsMap[blog.name] || (ownsLegacy ? legacyId : undefined);
+			// Prefer this blog's own flat id key, then the legacy map, then the legacy single id.
+			const knownId = fmStr(`${prefix}id_${suffix}`) || idsMap[blog.name] || (ownsLegacy ? legacyId : '') || undefined;
 			// Skip a blog with no usable API key rather than emit a cryptic 401.
 			if (!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()) {
 				new Notice(`Blog "${blog.name}" has no API key — set it in settings.`);
@@ -916,21 +923,22 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 			const post = this.syncEngine.lastSyncedPost;
 			if (post) {
-				if (idsMap[blog.name] !== post.id) { idsMap[blog.name] = post.id; mapsChanged = true; }
-				const u = post.url || '';
-				if (u && urlsMap[blog.name] !== u) { urlsMap[blog.name] = u; mapsChanged = true; }
+				// The legacy-owner blog keeps the clean single keys (g_id / g_public_url);
+				// every other blog gets its own clickable g_id_<suffix> / g_public_url_<suffix>.
+				const idKey = ownsLegacy ? `${prefix}id` : `${prefix}id_${suffix}`;
+				const urlKey = ownsLegacy ? `${prefix}public_url` : `${prefix}public_url_${suffix}`;
+				if (fmStr(idKey) !== post.id) updates[idKey] = post.id;
+				if (post.url && fmStr(urlKey) !== post.url) updates[urlKey] = post.url;
 			}
 		}
 		this.restoreDefaultBlogContext();
 
-		// For multi-blog notes, persist the per-blog id / public-url maps. (Single-blog
-		// notes already get g_id/g_url/g_public_url written by the sync engine.)
-		if (!writeBack && mapsChanged) {
+		// For multi-blog notes, persist per-blog keys and drop the old nested maps.
+		// (Single-blog notes already get g_id/g_url/g_public_url from the sync engine.)
+		if (!writeBack && (Object.keys(updates).length > 0 || hadOldMaps)) {
 			let content = await this.app.vault.read(file);
-			content = upsertFrontmatterKeys(content, {
-				[`${prefix}ids`]: this.serializeBlogMap(idsMap),
-				[`${prefix}public_urls`]: this.serializeBlogMap(urlsMap)
-			});
+			if (Object.keys(updates).length > 0) content = upsertFrontmatterKeys(content, updates);
+			if (hadOldMaps) content = removeFrontmatterKeys(content, [`${prefix}ids`, `${prefix}public_urls`]);
 			await this.app.vault.modify(file, content);
 		}
 		return ok;
@@ -1549,12 +1557,16 @@ class GhostWriterSettingTab extends PluginSettingTab {
 			text: 'Each blog has its own address, key, and folder. A note publishes to the blog(s) named in its g_blog property; the last blog you pick becomes the default for new notes.'
 		});
 
+		let warnEl: HTMLElement | null = null;
 		const colliding = plugin.collidingSecretBlogs();
 		if (colliding.length >= 2) {
-			const warn = containerEl.createEl('p', { cls: 'setting-item-description omnighost-warning' });
-			setIcon(warn.createSpan({ cls: 'omnighost-status-icon' }), 'alert-triangle');
-			warn.createSpan({ text: ` These blogs share one keychain secret (${colliding.map(b => b.name || 'untitled').join(', ')}), so they use the same admin key — the wrong one will fail with a 401. Set each blog's own key below.` });
+			warnEl = containerEl.createEl('p', { cls: 'setting-item-description omnighost-warning' });
+			setIcon(warnEl.createSpan({ cls: 'omnighost-status-icon' }), 'alert-triangle');
+			warnEl.createSpan({ text: ` These blogs share one keychain secret (${colliding.map(b => b.name || 'untitled').join(', ')}), so they use the same admin key — the wrong one will fail with a 401. Set each blog's own key below.` });
 		}
+		const refreshWarn = () => {
+			if (warnEl && plugin.collidingSecretBlogs().length < 2) { warnEl.remove(); warnEl = null; }
+		};
 
 		plugin.settings.blogs.forEach((blog) => {
 			const isDefault = blog.id === plugin.settings.defaultBlogId;
@@ -1583,21 +1595,33 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.addText(t => t.setPlaceholder('https://yourblog.com').setValue(blog.url).onChange(async v => { blog.url = v.trim(); await plugin.saveSettings(); }));
 			const hasKey = !!(blog.apiKeySecretName && plugin.loadApiKeyForSecret(blog.apiKeySecretName).trim());
 			let pendingKey = '';
-			new Setting(containerEl).setName('Admin API key')
-				.setDesc(hasKey ? 'A key is stored for this blog. Enter a new one to replace it.' : "Paste this blog's admin key (id:secret) and save.")
+			let keyInput: HTMLInputElement | null = null;
+			let secretNameInput: HTMLInputElement | null = null;
+			const keySetting = new Setting(containerEl).setName('Admin API key');
+			const setKeyDesc = (stored: boolean) => keySetting.setDesc(stored
+				? '✓ Key stored for this blog. Enter a new one to replace it.'
+				: "Paste this blog's admin key (id:secret) and save.");
+			setKeyDesc(hasKey);
+			keySetting
 				.addText(t => {
+					keyInput = t.inputEl;
 					t.inputEl.type = 'password';
-					t.setPlaceholder(hasKey ? 'stored — enter to replace' : 'id:secret');
+					t.setPlaceholder(hasKey ? 'Stored — enter to replace' : 'id:secret');
 					t.onChange(v => { pendingKey = v.trim(); });
 				})
 				.addButton(b => b.setButtonText('Save key').onClick(async () => {
 					if (!pendingKey) { new Notice('Enter a key first'); return; }
+					const prevName = blog.apiKeySecretName;
 					plugin.ensureUniqueSecretName(blog);
 					try {
 						this.app.secretStorage.setSecret(blog.apiKeySecretName, pendingKey);
 						await plugin.saveSettings();
-						new Notice(`Saved key for ${blog.name || 'blog'}`);
-						this.display();
+						pendingKey = '';
+						if (keyInput) { keyInput.value = ''; keyInput.placeholder = 'Stored — enter to replace'; }
+						if (secretNameInput && blog.apiKeySecretName !== prevName) secretNameInput.value = blog.apiKeySecretName;
+						setKeyDesc(true);
+						refreshWarn();
+						new Notice(`Saved key for ${blog.name || 'blog'} ✓`);
 					} catch (e) {
 						new Notice(`Could not save key: ${(e as Error).message}`);
 					}
@@ -1605,7 +1629,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 			new Setting(containerEl).setName('Key secret name')
 				.setDesc('Keychain secret holding this key (managed automatically; one per blog)')
 				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				.addText(t => t.setPlaceholder('secret name').setValue(blog.apiKeySecretName).onChange(async v => { blog.apiKeySecretName = v.trim(); await plugin.saveSettings(); }));
+				.addText(t => { secretNameInput = t.inputEl; t.setPlaceholder('secret name').setValue(blog.apiKeySecretName).onChange(async v => { blog.apiKeySecretName = v.trim(); await plugin.saveSettings(); }); });
 			new Setting(containerEl).setName('Folder')
 				.setDesc("Vault folder for this blog's posts")
 				.addText(t => t.setPlaceholder('Ghost posts').setValue(blog.folder).onChange(async v => { blog.folder = v.trim(); await plugin.saveSettings(); }));

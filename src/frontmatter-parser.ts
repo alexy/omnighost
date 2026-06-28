@@ -126,6 +126,24 @@ export function upsertFrontmatterKeys(
 }
 
 /**
+ * Remove keys from frontmatter. Drops the whole `key:` line, including a simple
+ * indented block value that follows it (e.g. a YAML map/list under the key).
+ */
+export function removeFrontmatterKeys(fileContent: string, keys: string[]): string {
+	const parsed = splitFrontmatter(fileContent);
+	if (!parsed) return fileContent;
+	let { raw } = parsed;
+	const { body } = parsed;
+	for (const key of keys) {
+		const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		// Match `key:` line plus any following more-indented (block) lines.
+		const pattern = new RegExp(`^${escapedKey}:.*(?:\\n[ \\t]+.*)*\\n?`, 'm');
+		raw = raw.replace(pattern, '');
+	}
+	return joinFrontmatter(raw.replace(/\n{2,}/g, '\n').replace(/^\n+/, ''), body);
+}
+
+/**
  * Parse Ghost metadata from frontmatter
  */
 export function parseGhostMetadata(
